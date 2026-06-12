@@ -198,13 +198,13 @@ MQTT_TOPIC_STATUS = "camera/status"
 MQTT_TOPIC_EVENTS = "camera/track/events"  # SRS tracking commands (JSON)
 MQTT_KEEPALIVE = 30
 MQTT_QOS = 1
-MQTT_MIN_COMMAND_INTERVAL_MS = 50
+MQTT_MIN_COMMAND_INTERVAL_MS = 80   # Smooth but responsive (ESP moves ~1 deg/25ms)
 
 # ----------------------------------------------------------------------------
 # SERVO CONTROL (must match ESP8266 firmware limits)
 # ----------------------------------------------------------------------------
-SERVO_MIN_ANGLE = 15
-SERVO_MAX_ANGLE = 165
+SERVO_MIN_ANGLE = 0
+SERVO_MAX_ANGLE = 180
 SERVO_CENTER_ANGLE = 90
 # Canonical aliases (Issue #7 "servo:" group)
 MIN_ANGLE = SERVO_MIN_ANGLE
@@ -215,21 +215,26 @@ CENTER_ANGLE = SERVO_CENTER_ANGLE
 # -1 if it pans toward image-left. Flip this if the camera chases the wrong way.
 SERVO_DIRECTION_SIGN = 1
 
-# PID-style pan controller (operates on normalized horizontal error in [-1, 1])
-SERVO_PID_KP = 26.0   # Proportional gain (deg per unit normalized error)
-SERVO_PID_KI = 0.0    # Integral gain (kept 0 by default to avoid windup)
-SERVO_PID_KD = 7.0    # Derivative gain (damps oscillation)
-SERVO_PID_I_CLAMP = 8.0  # Max absolute integral contribution (deg)
+# Smooth centering — face offset maps to pan angle (no jittery PID)
+SERVO_PAN_RANGE = 90           # Degrees from center when face is at frame edge
+SERVO_SMOOTH_ALPHA = 0.12      # Base smoothing (higher = faster centering)
+SERVO_SMOOTH_ALPHA_MAX = 0.22  # Faster when face is far from center
+SERVO_MIN_PUBLISH_DELTA = 1    # Min degrees before sending MQTT (reduces wiggle)
+SERVO_MAX_STEP_PER_FRAME = 5   # Max smooth step per video frame
 
-# Rate limiting / smoothing
-SERVO_MAX_SPEED = 12     # Max degrees the servo target may change per update (rate limit)
-MAX_SPEED = SERVO_MAX_SPEED  # Alias (Issue #7)
-SMOOTHING_FACTOR = 0.5   # EMA factor for the measured error (0=frozen, 1=no smoothing)
-SERVO_STEP_SIZE = 5      # Manual nudge step (left/right keys, command mode)
-SERVO_MAX_PAN_OFFSET = 45  # Legacy absolute-mapping cap (unused by PID path)
+# Legacy PID aliases (smooth centering is used instead)
+SERVO_PID_KP = 10.0
+SERVO_PID_KI = 0.0
+SERVO_PID_KD = 2.0
+SERVO_PID_I_CLAMP = 8.0
+SERVO_MAX_SPEED = 3
+MAX_SPEED = SERVO_MAX_SPEED
+SMOOTHING_FACTOR = 0.25
+SERVO_STEP_SIZE = 5
+SERVO_MAX_PAN_OFFSET = SERVO_PAN_RANGE
 
 # Dead zone: ignore tiny face offsets so the servo stays still when centered.
-CENTER_DEAD_ZONE = 25  # Pixels of half-width tolerance around frame center
+CENTER_DEAD_ZONE = 12  # Pixels — hold still only when face is near frame center
 SERVO_DEAD_ZONE_NORMALIZED = 0.08  # Legacy normalized fallback
 
 # ----------------------------------------------------------------------------
@@ -249,8 +254,8 @@ TRACKING_MOVEMENT_THRESHOLD = 0.05
 # ----------------------------------------------------------------------------
 LOST_TARGET_TIMEOUT = 0.8        # Seconds target may be missing before SEARCH_MODE
 LOST_TARGET_FRAMES = 8           # Frames a track may be missing before it is dropped
-SEARCH_SWEEP_SPEED = 90.0        # Degrees per second the sweep waypoint advances
-SEARCH_SWEEP_STEP = 12           # Degrees between successive sweep waypoints
+SEARCH_SWEEP_STEP = 3            # Degrees per search step (smooth continuous scan)
+SEARCH_STEP_INTERVAL_SEC = 0.12  # Match ESP ~1 deg / 25ms; keeps scanning without stutter
 SEARCH_START_DIRECTION = "last"  # "last" | "left" | "right" — where to look first
 SEARCH_EXPAND_ENABLED = True     # Expand outward from last-known angle before full sweep
 SEARCH_REACQUIRE_FRAMES = 2      # Frames the original target must be re-seen to re-lock

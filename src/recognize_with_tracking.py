@@ -258,9 +258,19 @@ def main(
                     break
                 is_lk = tr.track_id == tracker.locked_track_id
                 if tr.needs_recognition(frame_idx, is_lk, faces_present=faces_present):
+                    # Looser match while searching / re-acquiring the locked speaker
+                    reacquiring_face = (
+                        lock_name
+                        and tracker.locked_track_id is None
+                    )
+                    match_threshold = (
+                        config.FACE_MATCH_THRESHOLD
+                        if (is_lk or reacquiring_face)
+                        else threshold
+                    )
                     name, dist, accepted = recognize_face(
                         frame, tr.landmarks, aligner, embedder,
-                        embeddings_matrix, names, threshold,
+                        embeddings_matrix, names, match_threshold,
                     )
                     tr.apply_recognition(name, dist, accepted, frame_idx)
                     recog_events += 1
@@ -287,7 +297,11 @@ def main(
                 lost_since = None
                 prev_locked_track_id = None
                 tlog.idle()
-            elif locked is not None:
+            elif (
+                locked is not None
+                and locked.accepted
+                and locked.name == lock_name
+            ):
                 if prev_locked_track_id is None and lost_since is not None:
                     tlog.target_visible(
                         lock_name, locked.track_id, locked.center, pan.current_angle,
@@ -301,6 +315,9 @@ def main(
                 pan_label, commanded_angle = pan.track(locked.center[0], frame_w)
                 state = "LOCKED" if pan_label == "centered" else "TRACKING"
             else:
+                if locked is not None and locked.name != lock_name:
+                    tracker.release_lock()
+                    locked = None
                 # Locked identity selected but its track is not currently bound.
                 if lost_since is None:
                     lost_since = time.time()

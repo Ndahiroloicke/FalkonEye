@@ -15,7 +15,7 @@ def main() -> bool:
     ctrl = MQTTCameraController()
     time.sleep(2)
     if not ctrl.is_connected:
-        print("✗ Cannot connect to MQTT broker")
+        print("ERROR: Cannot connect to MQTT broker")
         return False
 
     for label, action in [
@@ -24,12 +24,12 @@ def main() -> bool:
         ("Right", ctrl.move_right),
         ("Center", ctrl.center),
     ]:
-        print(f"→ {label}")
+        print(f"> {label}")
         action()
         time.sleep(2)
 
     ctrl.close()
-    print("✓ Done")
+    print("OK: Done - servo should have moved center/left/right/center")
     return True
 
 

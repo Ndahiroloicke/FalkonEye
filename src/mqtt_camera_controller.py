@@ -31,7 +31,8 @@ class MQTTCameraController:
         self.topic_status = config.MQTT_TOPIC_STATUS
         self.topic_events = config.MQTT_TOPIC_EVENTS
 
-        self.current_angle = config.SERVO_CENTER_ANGLE
+        self.current_angle = config.SERVO_CENTER_ANGLE  # actual (from ESP status)
+        self.target_angle = config.SERVO_CENTER_ANGLE   # last command sent
         self.is_connected = False
         self.last_status: dict = {}
         self._last_publish_ms = 0.0
@@ -51,22 +52,22 @@ class MQTTCameraController:
         try:
             self.client.connect(self.broker_host, self.broker_port, keepalive=config.MQTT_KEEPALIVE)
             self.client.loop_start()
-            print(f"✓ MQTT connecting to {self.broker_host}:{self.broker_port}")
+            print(f"OK: MQTT connecting to {self.broker_host}:{self.broker_port}")
         except Exception as exc:
-            print(f"✗ MQTT connection failed: {exc}")
+            print(f"ERROR: MQTT connection failed: {exc}")
 
     def _on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
             self.is_connected = True
             client.subscribe(self.topic_status, qos=config.MQTT_QOS)
-            print(f"✓ MQTT connected, subscribed to {self.topic_status}")
+            print(f"OK: MQTT connected, subscribed to {self.topic_status}")
         else:
-            print(f"✗ MQTT connect failed rc={rc}")
+            print(f"ERROR: MQTT connect failed rc={rc}")
 
     def _on_disconnect(self, client, userdata, rc, properties=None):
         self.is_connected = False
         if rc != 0:
-            print(f"⚠ MQTT disconnected rc={rc}")
+            print(f"WARN: MQTT disconnected rc={rc}")
 
     def _on_message(self, client, userdata, msg):
         if msg.topic != self.topic_status:
@@ -98,13 +99,16 @@ class MQTTCameraController:
         result = self.client.publish(topic, payload, qos=config.MQTT_QOS)
         return result.rc == mqtt.MQTT_ERR_SUCCESS
 
+    def is_moving(self) -> bool:
+        return bool(self.last_status.get("moving", False))
+
     def move_to_angle(self, angle: int) -> bool:
         angle = int(max(config.SERVO_MIN_ANGLE, min(config.SERVO_MAX_ANGLE, angle)))
-        if abs(angle - self.current_angle) < 1:
+        if abs(angle - self.target_angle) < 1:
             return False
         ok = self._publish(self.topic_horizontal, str(angle))
         if ok:
-            self.current_angle = angle
+            self.target_angle = angle
         return ok
 
     def send_command(self, command: str) -> bool:

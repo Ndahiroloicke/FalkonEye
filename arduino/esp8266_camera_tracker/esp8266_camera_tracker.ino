@@ -30,8 +30,8 @@
 // ============================================================================
 
 // WiFi credentials
-const char* ssid = "Pingxiety";
-const char* password = "deserteagle0987654321";
+const char* ssid = "Crux Sacra";
+const char* password = "Nondracositmihidux";
 
 // MQTT Broker settings
 const char* mqtt_server = "157.173.101.159";  // Your MQTT broker IP
@@ -46,13 +46,13 @@ const char* topic_status = "camera/status";
 
 // Servo settings — SRS: D5 (GPIO14). Use D4 if your board is already wired there.
 const int SERVO_PIN = D5;
-const int SERVO_MIN_ANGLE = 15;
-const int SERVO_MAX_ANGLE = 165;
+const int SERVO_MIN_ANGLE = 0;
+const int SERVO_MAX_ANGLE = 180;
 const int SERVO_CENTER_ANGLE = 90;
-const int SERVO_STEP_SIZE = 10;  // Degrees per movement command
+const int SERVO_STEP_SIZE = 5;   // Manual nudge step (left/right commands)
 
-// Movement smoothing
-const int MOVEMENT_DELAY = 15;  // ms delay between servo steps for smooth movement
+// Movement smoothing — 1 degree per step; higher delay = smoother motion
+const int MOVEMENT_DELAY = 30;  // ms between each 1-degree step toward target
 
 // Debug mode
 #define DEBUG true

@@ -1,0 +1,5 @@
+timestamp,frame_number,activity_type,face_center_x,face_center_y,details
+2026-06-11T18:29:08.539152,44,move_left,402.0,248.5,dx=-91.5px
+2026-06-11T18:29:08.539505,44,move_down,402.0,248.5,dy=38.5px
+2026-06-11T18:29:08.835783,46,move_right,429.5,238.5,dx=27.5px
+2026-06-11T18:29:15.240241,88,move_up,470.5,202.5,dy=-32.0px

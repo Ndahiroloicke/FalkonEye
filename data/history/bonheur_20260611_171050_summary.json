@@ -1,0 +1,16 @@
+{
+  "person_name": "bonheur",
+  "session_start": "2026-06-11T17:10:50.090935",
+  "session_end": "2026-06-11T17:11:30.300225",
+  "session_duration_seconds": 40.21,
+  "activity_counts": {
+    "blink": 1,
+    "smile": 0,
+    "move_left": 2,
+    "move_right": 2,
+    "move_up": 1,
+    "move_down": 1
+  },
+  "total_activities": 7,
+  "csv_log": "/home/bonheur/Documents/Programming/Studying/Intelligent-Robotics/FaceLocking/data/history/bonheur_20260611_171050_activities.csv"
+}
