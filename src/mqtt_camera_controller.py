@@ -118,11 +118,13 @@ class MQTTCameraController:
         self._last_publish_ms = now
         return False
 
-    def _publish(self, topic: str, payload: str) -> bool:
+    def _publish(self, topic: str, payload: str, *, skip_rate_limit: bool = False) -> bool:
         if not self.is_connected:
             return False
-        if self._rate_limited():
+        if not skip_rate_limit and self._rate_limited():
             return False
+        if skip_rate_limit:
+            self._last_publish_ms = time.time() * 1000.0
         result = self.client.publish(topic, payload, qos=config.MQTT_QOS)
         return result.rc == mqtt.MQTT_ERR_SUCCESS
 
@@ -160,12 +162,15 @@ class MQTTCameraController:
         angle = int(max(config.SERVO_MIN_ANGLE, min(config.SERVO_MAX_ANGLE, angle)))
         if not force and not allow_retarget and abs(angle - self.target_angle) < 1:
             return False
-        if allow_retarget:
-            if abs(angle - self.target_angle) < 1:
+        if not force:
+            if allow_retarget:
+                if abs(angle - self.target_angle) < 1:
+                    return False
+            elif not self.ready_for_command(allow_stale=False):
                 return False
-        elif not self.ready_for_command(allow_stale=force):
-            return False
-        ok = self._publish(self.topic_horizontal, str(angle))
+        ok = self._publish(
+            self.topic_horizontal, str(angle), skip_rate_limit=force
+        )
         if ok:
             self.target_angle = angle
             self._angle_unchanged_since = time.time()

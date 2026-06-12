@@ -49,11 +49,14 @@ class ActivityLogger:
             "move_down": 0,
         }
         
-        # Movement tracking
+        # Movement tracking (smoothed — ignores bbox jitter when you are still)
         self.previous_face_center: Optional[Tuple[float, float]] = None
-        self.movement_threshold_x = 20  # pixels (INCREASED for less jitter)
-        self.movement_threshold_y = 20  # pixels (INCREASED for less jitter)
-        self.movement_cooldown = 8  # frames between movement detections (INCREASED to reduce noise)
+        self._smooth_face_center: Optional[Tuple[float, float]] = None
+        from . import config as app_config
+        self.movement_threshold_x = app_config.ACTIVITY_MOVEMENT_THRESHOLD_PX
+        self.movement_threshold_y = app_config.ACTIVITY_MOVEMENT_THRESHOLD_PX
+        self.movement_cooldown = app_config.ACTIVITY_MOVEMENT_COOLDOWN_FRAMES
+        self._movement_smooth = app_config.ACTIVITY_MOVEMENT_SMOOTHING
         self.last_movement_frame: Dict[str, int] = {}
         
         # Session start time
@@ -112,15 +115,19 @@ class ActivityLogger:
         """
         movements = []
         
-        if self.previous_face_center is None:
+        if self._smooth_face_center is None:
+            self._smooth_face_center = face_center
             self.previous_face_center = face_center
             return movements
-        
+
+        alpha = self._movement_smooth
+        sx = alpha * face_center[0] + (1.0 - alpha) * self._smooth_face_center[0]
+        sy = alpha * face_center[1] + (1.0 - alpha) * self._smooth_face_center[1]
+        self._smooth_face_center = (sx, sy)
+
         prev_x, prev_y = self.previous_face_center
-        curr_x, curr_y = face_center
-        
-        dx = curr_x - prev_x
-        dy = curr_y - prev_y
+        dx = sx - prev_x
+        dy = sy - prev_y
         
         # Detect horizontal movement
         if abs(dx) > self.movement_threshold_x:
@@ -164,8 +171,7 @@ class ActivityLogger:
                     self.last_movement_frame["move_up"] = frame_number
                     print(f"⬆️  DETECTED: Move UP (dy={dy:.1f}px)")
         
-        # Update previous position
-        self.previous_face_center = face_center
+        self.previous_face_center = self._smooth_face_center
         
         return movements
     

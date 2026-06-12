@@ -1,0 +1,1 @@
+timestamp,frame_number,speaker_id,confidence,distance,system_state,tracking_command,motor_command,servo_angle,servo_target,face_center_x,face_center_y,frame_width,mqtt_connected,details

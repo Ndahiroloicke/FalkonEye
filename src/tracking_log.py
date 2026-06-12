@@ -133,3 +133,17 @@ class TrackingLogger:
         )
         self._last_servo_reason = f"search:{to_angle}"
         self._last_servo_log_time = time.time()
+
+    def edge_recovery(self, from_angle: float, to_angle: int, side: str) -> None:
+        _logger.info(
+            "EDGE RECOVERY: %d° → %d° (face on %s — pulling toward center)",
+            int(from_angle), to_angle, side,
+        )
+        self._last_servo_reason = f"recovery:{to_angle}"
+        self._last_servo_log_time = time.time()
+
+    def learned_pan_sign(self, side: str, new_sign: float) -> None:
+        _logger.warning(
+            "LEARNED PAN SIGN: flipped to %+.0f after repeated blocks with face on %s",
+            new_sign, side,
+        )

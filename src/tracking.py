@@ -1,9 +1,8 @@
 """
 Pan tracking controller for the MQTT servo camera.
 
-TRACKING: keep the locked face in frame — never pan in a direction that pushes
-          them toward the edge; gentle corrections when already centered.
-SEARCH:   ping-pong sweep 0 -> 180 -> 0 until the speaker is reacquired.
+TRACKING: keep the locked face in frame — center them when visible.
+SEARCH:   continuous periodic sweep 0 -> 180 -> 0 until reacquired.
 """
 
 import time
@@ -43,6 +42,7 @@ class PanTracker:
 
         self.search_manual = False
         self._search_dir: int = 1
+        self._search_leg: str = "to_max"  # to_max (0->180) or to_min (180->0)
         self._last_search_step_time = 0.0
         self._search_active = False
 
@@ -54,17 +54,17 @@ class PanTracker:
         self.center_locked = False
         self.search_manual = False
         self._search_dir = 1
+        self._search_leg = "to_max"
         self._last_search_step_time = 0.0
         self._search_active = False
 
     def end_search(self) -> None:
-        """Leave search mode without resetting pan filter state."""
         self._search_active = False
         self._last_search_step_time = 0.0
         self._smooth_face_x = None
 
     def begin_search(self) -> None:
-        """Call once when entering SEARCH mode."""
+        """Start periodic 0 <-> 180 search from current position."""
         self._search_active = True
         self._last_search_step_time = 0.0
         self._smooth_face_x = None
@@ -72,19 +72,14 @@ class PanTracker:
             self.mqtt.sync_target_to_current()
 
         from_angle = int(round(self.current_angle))
-        lo = config.SERVO_MIN_ANGLE
-        hi = config.SERVO_MAX_ANGLE
         mid = config.SERVO_CENTER_ANGLE
-
-        # Ping-pong: start sweeping toward the nearest end, then reverse.
-        if from_angle >= mid:
-            self._search_dir = 1 if self.last_error_sign >= 0 else -1
+        # Sweep toward the far end first so motion covers full range periodically.
+        if from_angle <= mid:
+            self._search_leg = "to_max"
+            self._search_dir = 1
         else:
-            self._search_dir = -1 if self.last_error_sign <= 0 else 1
-        if self.last_error_sign != 0:
-            self._search_dir = self.last_error_sign * config.SERVO_DIRECTION_SIGN
-        if self._search_dir == 0:
-            self._search_dir = 1 if from_angle <= mid else -1
+            self._search_leg = "to_min"
+            self._search_dir = -1
 
     @property
     def current_angle(self) -> float:
@@ -140,7 +135,6 @@ class PanTracker:
         abs_err = abs(raw_error)
 
         if abs_err >= config.SERVO_EDGE_ERROR:
-            # Pull toward center but blend — avoids snapping past center.
             blend = 0.72
             self._smooth_angle = blend * raw_desired + (1.0 - blend) * self._smooth_angle
         elif self.center_locked:
@@ -162,7 +156,7 @@ class PanTracker:
         if abs_error >= config.SERVO_EDGE_ERROR:
             return config.SERVO_EDGE_MAX_STEP, config.SERVO_EDGE_MIN_PUBLISH_DELTA, True
         if abs_error >= config.SERVO_MID_ERROR:
-            return config.SERVO_CMD_MAX_STEP, 2, False
+            return config.SERVO_CMD_MAX_STEP, 2, True
         return (
             min(config.SERVO_CMD_MAX_STEP, config.SERVO_MAX_STEP_PER_FRAME),
             config.SERVO_MIN_PUBLISH_DELTA,
@@ -172,15 +166,16 @@ class PanTracker:
     def _clamp_cmd_no_overshoot(
         self, cmd: int, from_angle: int, error: float, equilibrium: int
     ) -> Optional[int]:
-        """Ensure the move pulls the face toward center, never pushes them out."""
-        if error > 0.02:
-            if cmd >= from_angle:
-                return None
-            cmd = max(cmd, equilibrium)
-        elif error < -0.02:
+        """Block moves that push the face away from center (respects direction sign)."""
+        signed = error * config.SERVO_DIRECTION_SIGN
+        if signed > 0.02:
             if cmd <= from_angle:
                 return None
             cmd = min(cmd, equilibrium)
+        elif signed < -0.02:
+            if cmd >= from_angle:
+                return None
+            cmd = max(cmd, equilibrium)
         else:
             return None
         return int(_clamp(cmd, config.SERVO_MIN_ANGLE, config.SERVO_MAX_ANGLE))
@@ -245,18 +240,12 @@ class PanTracker:
     def _search_command(self, desired: int, reason: str) -> Optional[int]:
         if not self.mqtt or not self.mqtt.is_connected:
             if self.log:
-                self.log.servo_hold(self.current_angle, "MQTT not connected")
+                self.log.servo_hold(self.current_angle, "search paused — no MQTT")
             return None
 
         from_angle = int(round(self.current_angle))
         desired = int(_clamp(desired, config.SERVO_MIN_ANGLE, config.SERVO_MAX_ANGLE))
-        if desired == from_angle:
-            return None
-
-        allow_stale = self.mqtt._motion_stale()
-        if not self.mqtt.ready_for_command(allow_stale=allow_stale):
-            if self.log:
-                self.log.servo_hold(from_angle, "search — servo moving")
+        if abs(desired - from_angle) < 1:
             return None
 
         if self.mqtt.move_to_angle(desired, force=True):
@@ -271,28 +260,34 @@ class PanTracker:
         return None
 
     def _next_search_angle(self, from_angle: int) -> Tuple[int, str]:
-        """Ping-pong: 0 -> 180 -> 0 -> 180 ..."""
+        """
+        Periodic sweep: 0 -> 180 -> 0 -> 180 ... until target reacquired.
+        Reverses direction at each end — never stops the pattern.
+        """
         lo = config.SERVO_MIN_ANGLE
         hi = config.SERVO_MAX_ANGLE
         step = config.SEARCH_SWEEP_STEP
 
-        if self._search_dir >= 0:
-            if from_angle >= hi - 2:
+        if self._search_leg == "to_max":
+            if from_angle >= hi - 1:
+                self._search_leg = "to_min"
                 self._search_dir = -1
                 nxt = max(from_angle - step, lo)
-                return nxt, "search reverse at 180°"
+                return nxt, "search periodic reverse at 180"
             nxt = min(from_angle + step, hi)
-            return nxt, f"search sweep -> {nxt}"
+            return nxt, f"search periodic 0->180 ({nxt})"
 
-        if from_angle <= lo + 2:
+        if from_angle <= lo + 1:
+            self._search_leg = "to_max"
             self._search_dir = 1
             nxt = min(from_angle + step, hi)
-            return nxt, "search reverse at 0°"
+            return nxt, "search periodic reverse at 0"
+
         nxt = max(from_angle - step, lo)
-        return nxt, f"search sweep -> {nxt}"
+        return nxt, f"search periodic 180->0 ({nxt})"
 
     def track(self, face_center_x: float, frame_width: int) -> Tuple[str, Optional[int]]:
-        """Keep the locked face centered; never pan them toward the frame edge."""
+        """Keep the locked face centered in the frame."""
         raw_error = self.normalized_error(face_center_x, frame_width)
         smooth_x = self._ema_face_x(face_center_x, abs(raw_error))
         error = self.normalized_error(smooth_x, frame_width)
@@ -334,6 +329,7 @@ class PanTracker:
         return (label, commanded)
 
     def search(self) -> Tuple[str, Optional[int]]:
+        """Continuous periodic 0-180 sweep until the speaker is found again."""
         self.frames_in_center = 0
         self.center_locked = False
 
@@ -357,9 +353,10 @@ class PanTracker:
         self.search_manual = not self.search_manual
         if self.search_manual:
             self._last_search_step_time = 0.0
+            self.begin_search()
 
     def force_center(self) -> None:
         self.reset()
         self._smooth_angle = float(config.SERVO_CENTER_ANGLE)
         if self.mqtt:
-            self.mqtt.center()
+            self.mqtt.move_to_angle(config.SERVO_CENTER_ANGLE, force=True)

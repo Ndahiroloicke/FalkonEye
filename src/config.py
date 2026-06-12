@@ -181,6 +181,11 @@ LOCK_EAR_RIGHT_INDICES = (362, 385, 387, 263, 373, 380)
 LOCK_MOUTH_LEFT_INDEX = 61
 LOCK_MOUTH_RIGHT_INDEX = 291
 
+# Activity logger (head movement detection for locked speaker)
+ACTIVITY_MOVEMENT_THRESHOLD_PX = 25   # Min smoothed px delta to count left/right/up/down
+ACTIVITY_MOVEMENT_COOLDOWN_FRAMES = 10  # Frames between repeated movement logs
+ACTIVITY_MOVEMENT_SMOOTHING = 0.35    # EMA alpha for face center in activity_logger
+
 # ============================================================================
 # MQTT CAMERA TRACKING SETTINGS
 # ============================================================================
@@ -219,7 +224,7 @@ CENTER_ANGLE = SERVO_CENTER_ANGLE
 
 # Mounting sign: +1 if increasing angle pans the camera toward image-right,
 # -1 if it pans toward image-left. Flip this if the camera chases the wrong way.
-SERVO_DIRECTION_SIGN = 1
+SERVO_DIRECTION_SIGN = -1
 
 # Pan mapping — face at frame edge maps to center ± SERVO_PAN_RANGE
 SERVO_PAN_RANGE = 80
@@ -263,10 +268,10 @@ TRACKING_MOVEMENT_THRESHOLD = 0.05
 # ----------------------------------------------------------------------------
 LOST_TARGET_TIMEOUT = 2.0        # Seconds with no face at all before SEARCH_MODE
 LOST_TARGET_FRAMES = 15          # Keep lock longer through brief detection gaps
-SEARCH_SWEEP_STEP = 6
-SEARCH_STEP_INTERVAL_SEC = 0.45
-SEARCH_STALE_MOVE_SEC = 2.0
-SEARCH_WRAP_AT_END = False       # Ping-pong 0 <-> 180 (reverse at each end)
+SEARCH_SWEEP_STEP = 8
+SEARCH_STEP_INTERVAL_SEC = 0.35   # Steady periodic sweep while searching
+SEARCH_STALE_MOVE_SEC = 1.5
+SEARCH_WRAP_AT_END = False          # Ping-pong: reverse at 0 and 180 forever
 SEARCH_START_DIRECTION = "last"  # "last" | "left" | "right" — where to look first
 SEARCH_EXPAND_ENABLED = True     # Expand outward from last-known angle before full sweep
 SEARCH_REACQUIRE_FRAMES = 2      # Frames the original target must be re-seen to re-lock

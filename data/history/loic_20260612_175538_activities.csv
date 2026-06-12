@@ -1,0 +1,4 @@
+timestamp,frame_number,activity_type,face_center_x,face_center_y,details
+2026-06-12T17:55:52.668615,356,blink,366.5,213.0,
+2026-06-12T17:56:04.876029,720,blink,319.0,215.0,
+2026-06-12T17:56:06.244904,760,move_right,558.0,155.0,dx=45.2px

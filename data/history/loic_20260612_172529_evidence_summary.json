@@ -1,0 +1,21 @@
+{
+  "session_id": "loic_20260612_172529",
+  "speaker_id": "loic",
+  "started_at": "2026-06-12T17:25:29.342972",
+  "duration_seconds": 126.63,
+  "total_logged_events": 3417,
+  "tracking_command_counts": {
+    "OUT_OF_FRAME": 4,
+    "SCAN": 3399,
+    "STOPPED": 8,
+    "MOVED_RIGHT": 3,
+    "MOVED_LEFT": 3
+  },
+  "evidence_csv": "C:\\Users\\RCA_USER_40\\Downloads\\FaceLocking-master\\FaceLocking-master\\data\\history\\loic_20260612_172529_evidence.csv",
+  "srs_compliance": {
+    "speaker_id_logged": true,
+    "confidence_logged": true,
+    "timestamps_logged": true,
+    "motor_commands_logged": true
+  }
+}
