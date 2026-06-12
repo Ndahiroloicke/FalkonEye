@@ -29,6 +29,7 @@ class MQTTCameraController:
         self.topic_horizontal = config.MQTT_TOPIC_HORIZONTAL
         self.topic_command = config.MQTT_TOPIC_COMMAND
         self.topic_status = config.MQTT_TOPIC_STATUS
+        self.topic_events = config.MQTT_TOPIC_EVENTS
 
         self.current_angle = config.SERVO_CENTER_ANGLE
         self.is_connected = False
@@ -119,6 +120,29 @@ class MQTTCameraController:
 
     def center(self) -> bool:
         return self.move_to_angle(config.SERVO_CENTER_ANGLE)
+
+    def publish_tracking_event(
+        self,
+        event: str,
+        speaker_id: str = "",
+        confidence: float = 0.0,
+        servo_angle: int = 0,
+        motor_command: str = "",
+        details: str = "",
+    ) -> bool:
+        """Publish SRS-style tracking event JSON for assessor evidence."""
+        payload = json.dumps(
+            {
+                "event": event,
+                "speaker": speaker_id,
+                "confidence": round(confidence, 4),
+                "servo_angle": int(servo_angle),
+                "motor_command": motor_command,
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "details": details,
+            }
+        )
+        return self._publish(self.topic_events, payload)
 
     def wait_for_connection(self, timeout_sec: float = 5.0) -> bool:
         """Block until connected or timeout (connect is async via loop_start)."""

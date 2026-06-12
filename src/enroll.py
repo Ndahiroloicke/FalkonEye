@@ -149,7 +149,7 @@ def main():
             info_lines = [
                 f"ENROLL: {name}",
                 f"Existing: {len(existing_samples)} | New: {len(new_samples)} | Total: {total_samples}",
-                f"Need: {config.SAMPLES_NEEDED_FOR_ENROLLMENT}",
+                f"Need: {config.MIN_SAMPLES_TO_SAVE}-{config.MAX_SAMPLES_TO_SAVE} (target {config.SAMPLES_NEEDED_FOR_ENROLLMENT})",
                 f"Auto: {'ON' if auto_mode else 'OFF'} (a)",
                 f"FPS: {fps:.1f}",
                 status_msg,
@@ -186,12 +186,12 @@ def main():
                     status_msg = f"Captured {len(new_samples)}"
             elif key == ord("s"):
                 total = len(existing_samples) + len(new_samples)
-                if total < max(3, config.SAMPLES_NEEDED_FOR_ENROLLMENT // 2):
-                    status_msg = f"Not enough samples ({total})"
+                if total < config.MIN_SAMPLES_TO_SAVE:
+                    status_msg = f"Need at least {config.MIN_SAMPLES_TO_SAVE} samples ({total})"
                     continue
-                
-                # Compute template
-                all_embeddings = existing_samples + new_samples
+
+                # Compute template (SRS: use up to MAX_SAMPLES_TO_SAVE)
+                all_embeddings = (existing_samples + new_samples)[: config.MAX_SAMPLES_TO_SAVE]
                 template = mean_embedding(all_embeddings)
                 
                 db[name] = template

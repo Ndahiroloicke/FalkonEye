@@ -132,6 +132,8 @@ class FaceTracker:
         self.max_center_dist_ratio = max_center_dist_ratio
         self._next_id = 1
         self.locked_track_id: Optional[int] = None
+        self._reacquire_candidate_id: Optional[int] = None
+        self._reacquire_count: int = 0
 
     def _new_track(self, det: FaceDetection, frame_idx: int) -> Track:
         center = ((det.x1 + det.x2) / 2.0, (det.y1 + det.y2) / 2.0)
@@ -214,16 +216,39 @@ class FaceTracker:
             return None
         return self.tracks.get(self.locked_track_id)
 
-    def acquire_lock(self, lock_name: str) -> Optional[Track]:
+    def acquire_lock(
+        self, lock_name: str, require_stable_frames: bool = False
+    ) -> Optional[Track]:
         """Bind the lock to the best visible track matching lock_name."""
         best: Optional[Track] = None
         for tr in self.visible_tracks():
             if tr.accepted and tr.name == lock_name:
                 if best is None or tr.best_dist < best.best_dist:
                     best = tr
-        if best is not None:
+
+        if best is None:
+            self._reacquire_candidate_id = None
+            self._reacquire_count = 0
+            return None
+
+        if not require_stable_frames:
             self.locked_track_id = best.track_id
-        return best
+            self._reacquire_candidate_id = None
+            self._reacquire_count = 0
+            return best
+
+        if best.track_id == self._reacquire_candidate_id:
+            self._reacquire_count += 1
+        else:
+            self._reacquire_candidate_id = best.track_id
+            self._reacquire_count = 1
+
+        if self._reacquire_count >= config.SEARCH_REACQUIRE_FRAMES:
+            self.locked_track_id = best.track_id
+            self._reacquire_candidate_id = None
+            self._reacquire_count = 0
+            return best
+        return None
 
     def release_lock(self) -> None:
         self.locked_track_id = None

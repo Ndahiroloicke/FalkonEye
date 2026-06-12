@@ -86,8 +86,9 @@ EMBEDDING_PREPROCESS_SCALE = 128.0
 # ENROLLMENT SETTINGS
 # ============================================================================
 
-SAMPLES_NEEDED_FOR_ENROLLMENT = 15
-MIN_SAMPLES_TO_SAVE = 3
+SAMPLES_NEEDED_FOR_ENROLLMENT = 15  # SRS target: 10-30 samples
+MIN_SAMPLES_TO_SAVE = 10  # SRS minimum enrollment samples
+MAX_SAMPLES_TO_SAVE = 30  # SRS maximum enrollment samples
 MAX_EXISTING_CROPS_PER_PERSON = 300
 AUTO_CAPTURE_INTERVAL_SECONDS = 0.25
 SAVE_ENROLLMENT_CROPS = True
@@ -194,6 +195,7 @@ MQTT_PASSWORD = None  # Optional: Set if broker requires authentication
 MQTT_TOPIC_HORIZONTAL = "camera/track/horizontal"
 MQTT_TOPIC_COMMAND = "camera/track/command"
 MQTT_TOPIC_STATUS = "camera/status"
+MQTT_TOPIC_EVENTS = "camera/track/events"  # SRS tracking commands (JSON)
 MQTT_KEEPALIVE = 30
 MQTT_QOS = 1
 MQTT_MIN_COMMAND_INTERVAL_MS = 50
@@ -275,7 +277,12 @@ DEBUG_MODE = False
 VERBOSE_LOGGING = False
 TRACKING_LOG_ENABLED = True  # Console logs for lock visibility and servo decisions
 TRACKING_STATUS_INTERVAL_SEC = 2.0  # Min seconds between repeated hold/missing messages
+EVIDENCE_LOG_ENABLED = True  # SRS CSV/JSON evidence logs in data/history/
+EVIDENCE_LOG_EVERY_FRAME = False  # True = verbose per-frame log; False = on state changes
 SAVE_DEBUG_FRAMES = False
+
+# Optional default speaker for demos (None = prompt at startup)
+DEFAULT_SPEAKER_LOCK = None
 
 # ============================================================================
 # QUALITY CHECKS

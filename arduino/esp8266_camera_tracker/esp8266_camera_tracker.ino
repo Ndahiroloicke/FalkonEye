@@ -10,9 +10,10 @@
  * - Camera mounted on servo
  * 
  * Connections:
- * - Servo Signal -> D4 (GPIO2)
- * - Servo VCC -> 5V
+ * - Servo Signal -> D5 (GPIO14)  [SRS hardware spec]
+ * - Servo VCC -> VIN (5V)
  * - Servo GND -> GND
+ * Alternate pin: D4 (GPIO2) if D5 is unavailable
  * 
  * MQTT Topics:
  * - camera/track/horizontal - Receives horizontal position (0-180 degrees)
@@ -29,8 +30,8 @@
 // ============================================================================
 
 // WiFi credentials
-const char* ssid = "Crux Sacra";
-const char* password = "Nondracositmihidux";
+const char* ssid = "Pingxiety";
+const char* password = "deserteagle0987654321";
 
 // MQTT Broker settings
 const char* mqtt_server = "157.173.101.159";  // Your MQTT broker IP
@@ -43,8 +44,8 @@ const char* topic_horizontal = "camera/track/horizontal";
 const char* topic_command = "camera/track/command";
 const char* topic_status = "camera/status";
 
-// Servo settings (NodeMCU / Wemos D4 = GPIO2)
-const int SERVO_PIN = D4;
+// Servo settings — SRS: D5 (GPIO14). Use D4 if your board is already wired there.
+const int SERVO_PIN = D5;
 const int SERVO_MIN_ANGLE = 15;
 const int SERVO_MAX_ANGLE = 165;
 const int SERVO_CENTER_ANGLE = 90;

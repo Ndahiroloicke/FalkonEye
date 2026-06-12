@@ -35,5 +35,6 @@ Configure broker and camera in `src/config.py`. Flash the Arduino sketch after u
 
 ## Docs
 
+- [SRS_ALIGNMENT.md](SRS_ALIGNMENT.md) — BENAX SRS completion status + pipeline flowchart
 - [TEST_GUIDE.md](TEST_GUIDE.md) — step-by-step testing
 - [arduino/README.md](arduino/README.md) — wiring and firmware

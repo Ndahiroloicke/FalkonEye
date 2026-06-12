@@ -44,6 +44,8 @@ from .recognition_core import (
 from .tracking import PanTracker
 from .tracking_log import TrackingLogger
 from .camera_utils import CameraStream
+from .evidence_logger import EvidenceLogger
+from .srs_commands import derive_command, motor_command_label
 
 
 def _draw_debug_overlay(
@@ -110,6 +112,7 @@ def main(
     enable_mqtt: bool = True,
     mqtt_broker: str = None,
     mqtt_port: int = None,
+    speaker_lock: str = None,
 ) -> bool:
     db = load_database()
     if not db:
@@ -125,7 +128,12 @@ def main(
     names = sorted(db.keys())
     embeddings_matrix = np.stack([db[n].reshape(-1) for n in names], axis=0).astype(np.float32)
 
-    lock_name: Optional[str] = choose_lock_identity(names)
+    lock_name: Optional[str] = speaker_lock or config.DEFAULT_SPEAKER_LOCK
+    if lock_name and lock_name not in names:
+        print(f"WARNING: Speaker '{lock_name}' not enrolled. Choose from: {names}")
+        lock_name = None
+    if not lock_name:
+        lock_name = choose_lock_identity(names)
     if not lock_name:
         print("WARNING: No lock selected. Running recognition only (IDLE).")
 
@@ -145,8 +153,12 @@ def main(
     pan = PanTracker(mqtt=mqtt, logger=tlog)
 
     activity_logger: Optional[ActivityLogger] = None
+    evidence_logger: Optional[EvidenceLogger] = None
     if lock_name:
         activity_logger = ActivityLogger(lock_name, config.HISTORY_DIR)
+        if config.EVIDENCE_LOG_ENABLED:
+            evidence_logger = EvidenceLogger(lock_name, config.HISTORY_DIR)
+            print(f"Evidence log: {evidence_logger.csv_path}")
 
     cam = open_camera()
     if cam is None:
@@ -175,6 +187,8 @@ def main(
     recog_fps = 0.0
     last_frame = None
     camera_warning_frames = 0
+    prev_servo_angle = float(config.SERVO_CENTER_ANGLE)
+    last_srs_command = None
 
     window_name = "Face Tracking"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
@@ -253,13 +267,19 @@ def main(
                     budget -= 1
 
             # --- Lock acquisition / reacquisition --------------------------
+            reacquiring = state == "SEARCHING" or lost_since is not None
             if lock_name and tracker.locked_track_id is None:
-                candidate = tracker.acquire_lock(lock_name)
+                candidate = tracker.acquire_lock(
+                    lock_name, require_stable_frames=reacquiring
+                )
                 if candidate is not None:
                     pan.reset()  # drop any search sweep, resume clean tracking
-                    print(f"✓ Locked onto {lock_name} (track #{candidate.track_id})")
+                    print(f"OK: Locked onto {lock_name} (track #{candidate.track_id})")
 
             locked = tracker.locked_track
+            pan_label: Optional[str] = None
+            commanded_angle: Optional[int] = None
+            in_grace_period = False
 
             # --- Servo control + state machine -----------------------------
             if not lock_name:
@@ -278,8 +298,8 @@ def main(
                     )
                 lost_since = None
                 prev_locked_track_id = locked.track_id
-                label, _ = pan.track(locked.center[0], frame_w)
-                state = "LOCKED" if label == "centered" else "TRACKING"
+                pan_label, commanded_angle = pan.track(locked.center[0], frame_w)
+                state = "LOCKED" if pan_label == "centered" else "TRACKING"
             else:
                 # Locked identity selected but its track is not currently bound.
                 if lost_since is None:
@@ -292,11 +312,53 @@ def main(
                         direction = "right" if pan.last_error_sign > 0 else "left" if pan.last_error_sign < 0 else "center"
                         tlog.search_started(lock_name, pan.last_known_angle, direction)
                     state = "SEARCHING"
-                    pan.search()
+                    pan_label, commanded_angle = pan.search()
                 else:
                     state = "TRACKING"  # brief grace period: hold position
+                    in_grace_period = True
+                    pan_label = None
                     tlog.target_still_missing(lock_name, lost_for)
                     tlog.servo_hold(pan.current_angle, "target out of frame — holding during grace period")
+
+            # --- SRS evidence + MQTT tracking events ---------------------
+            if lock_name:
+                srs_cmd = derive_command(
+                    state,
+                    pan_label,
+                    pan.current_angle,
+                    prev_servo_angle,
+                    commanded_angle,
+                    in_grace_period=in_grace_period,
+                )
+                confidence = locked.confidence if locked else 0.0
+                distance = locked.best_dist if locked else 1.0
+                if evidence_logger:
+                    evidence_logger.log_frame(
+                        frame_number=frame_idx,
+                        confidence=confidence,
+                        distance=distance,
+                        system_state=state,
+                        tracking_command=srs_cmd,
+                        servo_angle=pan.current_angle,
+                        servo_target=commanded_angle,
+                        face_center_x=locked.center[0] if locked else None,
+                        face_center_y=locked.center[1] if locked else None,
+                        frame_width=frame_w,
+                        mqtt_connected=bool(mqtt and mqtt.is_connected),
+                        details=f"visible_faces={len(visible)}",
+                        force=config.EVIDENCE_LOG_EVERY_FRAME,
+                    )
+                if mqtt and mqtt.is_connected and srs_cmd.value != last_srs_command:
+                    mqtt.publish_tracking_event(
+                        event=srs_cmd.value,
+                        speaker_id=lock_name,
+                        confidence=confidence,
+                        servo_angle=int(round(pan.current_angle)),
+                        motor_command=motor_command_label(srs_cmd),
+                        details=state,
+                    )
+                    last_srs_command = srs_cmd.value
+                prev_servo_angle = pan.current_angle
 
             # --- Activity logging for the locked, visible target -----------
             if (
@@ -383,6 +445,10 @@ def main(
                     pan.reset()
                     if activity_logger is None:
                         activity_logger = ActivityLogger(lock_name, config.HISTORY_DIR)
+                    if config.EVIDENCE_LOG_ENABLED:
+                        if evidence_logger:
+                            evidence_logger.close()
+                        evidence_logger = EvidenceLogger(lock_name, config.HISTORY_DIR)
                     print(f"Lock target set to {lock_name}")
             elif key == ord("s"):
                 pan.toggle_search()
@@ -405,6 +471,9 @@ def main(
     finally:
         if activity_logger:
             activity_logger.save_summary()
+        if evidence_logger:
+            summary = evidence_logger.close()
+            print(f"Evidence saved: {summary.get('evidence_csv')}")
         if mqtt:
             mqtt.close()
         detector.close()
@@ -423,6 +492,7 @@ if __name__ == "__main__":
     parser.add_argument("--no-mqtt", action="store_true", help="Disable MQTT servo control")
     parser.add_argument("--broker", type=str, default=None, help="MQTT broker IP")
     parser.add_argument("--port", type=int, default=None, help="MQTT broker port")
+    parser.add_argument("--speaker", type=str, default=None, help="Pre-enrolled speaker to lock (SRS)")
     args = parser.parse_args()
 
     ok = main(
@@ -430,5 +500,6 @@ if __name__ == "__main__":
         enable_mqtt=not args.no_mqtt,
         mqtt_broker=args.broker,
         mqtt_port=args.port,
+        speaker_lock=args.speaker,
     )
     sys.exit(0 if ok else 1)
