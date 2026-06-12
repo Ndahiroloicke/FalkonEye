@@ -46,6 +46,8 @@ from .tracking_log import TrackingLogger
 from .camera_utils import CameraStream
 from .evidence_logger import EvidenceLogger
 from .srs_commands import derive_command, motor_command_label
+from . import dashboard_state
+from .dashboard_server import start_dashboard, stop_dashboard
 
 
 def _draw_debug_overlay(
@@ -113,6 +115,7 @@ def main(
     mqtt_broker: str = None,
     mqtt_port: int = None,
     speaker_lock: str = None,
+    enable_dashboard: bool = True,
 ) -> bool:
     db = load_database()
     if not db:
@@ -159,6 +162,11 @@ def main(
         if config.EVIDENCE_LOG_ENABLED:
             evidence_logger = EvidenceLogger(lock_name, config.HISTORY_DIR)
             print(f"Evidence log: {evidence_logger.csv_path}")
+
+    if enable_dashboard and config.DASHBOARD_ENABLED:
+        dashboard_state.reset_session()
+        dash_url = start_dashboard()
+        print(f"Dashboard: {dash_url}")
 
     cam = open_camera()
     if cam is None:
@@ -436,6 +444,37 @@ def main(
 
             cv2.imshow(window_name, vis)
 
+            if enable_dashboard and config.DASHBOARD_ENABLED:
+                face_x = follow.center[0] if follow is not None else None
+                face_y = follow.center[1] if follow is not None else None
+                face_err = None
+                if face_x is not None and frame_w:
+                    face_err = (face_x - frame_w / 2.0) / (frame_w / 2.0)
+                servo_target = int(mqtt.last_status.get("target", mqtt.target_angle)) if mqtt else int(round(pan.current_angle))
+                dashboard_state.update(
+                    frame_number=frame_idx,
+                    system_state=state,
+                    locked_speaker=lock_name,
+                    face_count=len(visible),
+                    confidence=follow.confidence if follow and follow.accepted else 0.0,
+                    face_center_x=face_x,
+                    face_center_y=face_y,
+                    frame_width=frame_w,
+                    frame_height=frame.shape[0],
+                    face_error=face_err,
+                    track_fps=track_fps,
+                    recog_fps=recog_fps,
+                    servo_angle=float(pan.current_angle),
+                    servo_target=servo_target,
+                    servo_moving=mqtt.is_moving() if mqtt else False,
+                    commanded_angle=commanded_angle,
+                    motor_command=motor_command_label(last_srs_command) if last_srs_command else "STOP",
+                    mqtt_connected=bool(mqtt and mqtt.is_connected),
+                    mqtt_broker=f"{mqtt.broker_host}:{mqtt.broker_port}" if mqtt else "",
+                    lost_for_sec=(time.time() - lost_since) if lost_since else 0.0,
+                    threshold=threshold,
+                )
+
             # --- Keyboard --------------------------------------------------
             key = cv2.waitKey(1) & 0xFF
             if not CameraStream.is_window_open(window_name):
@@ -493,6 +532,9 @@ def main(
                 threshold = max(0.0, threshold - 0.01)
 
     finally:
+        if enable_dashboard and config.DASHBOARD_ENABLED:
+            dashboard_state.stop()
+            stop_dashboard()
         if activity_logger:
             activity_logger.save_summary()
         if evidence_logger:
@@ -517,6 +559,7 @@ if __name__ == "__main__":
     parser.add_argument("--broker", type=str, default=None, help="MQTT broker IP")
     parser.add_argument("--port", type=int, default=None, help="MQTT broker port")
     parser.add_argument("--speaker", type=str, default=None, help="Pre-enrolled speaker to lock (SRS)")
+    parser.add_argument("--no-dashboard", action="store_true", help="Disable live web dashboard")
     args = parser.parse_args()
 
     ok = main(
@@ -525,5 +568,6 @@ if __name__ == "__main__":
         mqtt_broker=args.broker,
         mqtt_port=args.port,
         speaker_lock=args.speaker,
+        enable_dashboard=not args.no_dashboard,
     )
     sys.exit(0 if ok else 1)

@@ -14,6 +14,7 @@ if __name__ == "__main__":
     parser.add_argument("--broker", type=str, default=None)
     parser.add_argument("--port", type=int, default=None)
     parser.add_argument("--speaker", type=str, default=None, help="Enrolled speaker to lock")
+    parser.add_argument("--no-dashboard", action="store_true", help="Disable live web dashboard")
     args = parser.parse_args()
 
     success = main(
@@ -22,5 +23,6 @@ if __name__ == "__main__":
         mqtt_broker=args.broker,
         mqtt_port=args.port,
         speaker_lock=args.speaker,
+        enable_dashboard=not args.no_dashboard,
     )
     sys.exit(0 if success else 1)

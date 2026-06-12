@@ -300,6 +300,11 @@ SAVE_DEBUG_FRAMES = False
 # Optional default speaker for demos (None = prompt at startup)
 DEFAULT_SPEAKER_LOCK = None
 
+# Live web dashboard (stdlib HTTP — no extra packages)
+DASHBOARD_ENABLED = True
+DASHBOARD_HOST = "127.0.0.1"
+DASHBOARD_PORT = 8765
+
 # ============================================================================
 # QUALITY CHECKS
 # ============================================================================
