@@ -252,3 +252,21 @@ class FaceTracker:
 
     def release_lock(self) -> None:
         self.locked_track_id = None
+
+    def follow_track(self) -> Optional[Track]:
+        """Bound lock still visible — keep panning even if recognition flickers."""
+        if self.locked_track_id is None:
+            return None
+        locked = self.locked_track
+        if locked is not None and locked.misses == 0:
+            return locked
+        return None
+
+    def visible_speaker(self, lock_name: str) -> Optional[Track]:
+        """Best on-screen track matching the locked speaker name."""
+        best: Optional[Track] = None
+        for tr in self.visible_tracks():
+            if tr.accepted and tr.name == lock_name:
+                if best is None or tr.best_dist < best.best_dist:
+                    best = tr
+        return best

@@ -283,10 +283,14 @@ def main(
                     lock_name, require_stable_frames=reacquiring
                 )
                 if candidate is not None:
-                    pan.reset()  # drop any search sweep, resume clean tracking
+                    pan.end_search()
                     print(f"OK: Locked onto {lock_name} (track #{candidate.track_id})")
 
             locked = tracker.locked_track
+            follow = tracker.follow_track()
+            if follow is None and lock_name:
+                follow = tracker.visible_speaker(lock_name)
+
             pan_label: Optional[str] = None
             commanded_angle: Optional[int] = None
             in_grace_period = False
@@ -297,28 +301,29 @@ def main(
                 lost_since = None
                 prev_locked_track_id = None
                 tlog.idle()
-            elif (
-                locked is not None
-                and locked.accepted
-                and locked.name == lock_name
-            ):
+            elif follow is not None:
+                track_name = follow.name if follow.accepted else lock_name
                 if prev_locked_track_id is None and lost_since is not None:
                     tlog.target_visible(
-                        lock_name, locked.track_id, locked.center, pan.current_angle,
+                        lock_name, follow.track_id, follow.center, pan.current_angle,
                     )
-                elif prev_locked_track_id != locked.track_id:
+                elif prev_locked_track_id != follow.track_id:
                     tlog.target_visible(
-                        lock_name, locked.track_id, locked.center, pan.current_angle,
+                        lock_name, follow.track_id, follow.center, pan.current_angle,
                     )
                 lost_since = None
-                prev_locked_track_id = locked.track_id
-                pan_label, commanded_angle = pan.track(locked.center[0], frame_w)
-                state = "LOCKED" if pan_label == "centered" else "TRACKING"
+                prev_locked_track_id = follow.track_id
+                pan.end_search()
+                pan_label, commanded_angle = pan.track(follow.center[0], frame_w)
+                if follow.accepted and follow.name == lock_name:
+                    state = "LOCKED" if pan_label == "centered" else "TRACKING"
+                else:
+                    state = "TRACKING"
             else:
                 if locked is not None and locked.name != lock_name:
                     tracker.release_lock()
                     locked = None
-                # Locked identity selected but its track is not currently bound.
+                # No visible face for the locked speaker — grace, then search.
                 if lost_since is None:
                     lost_since = time.time()
                     prev_locked_track_id = None
@@ -340,6 +345,7 @@ def main(
 
             # --- SRS evidence + MQTT tracking events ---------------------
             if lock_name:
+                ev_track = follow if follow is not None else locked
                 srs_cmd = derive_command(
                     state,
                     pan_label,
@@ -348,8 +354,8 @@ def main(
                     commanded_angle,
                     in_grace_period=in_grace_period,
                 )
-                confidence = locked.confidence if locked else 0.0
-                distance = locked.best_dist if locked else 1.0
+                confidence = ev_track.confidence if ev_track else 0.0
+                distance = ev_track.best_dist if ev_track else 1.0
                 if evidence_logger:
                     evidence_logger.log_frame(
                         frame_number=frame_idx,
@@ -359,8 +365,8 @@ def main(
                         tracking_command=srs_cmd,
                         servo_angle=pan.current_angle,
                         servo_target=commanded_angle,
-                        face_center_x=locked.center[0] if locked else None,
-                        face_center_y=locked.center[1] if locked else None,
+                        face_center_x=ev_track.center[0] if ev_track else None,
+                        face_center_y=ev_track.center[1] if ev_track else None,
                         frame_width=frame_w,
                         mqtt_connected=bool(mqtt and mqtt.is_connected),
                         details=f"visible_faces={len(visible)}",
@@ -380,20 +386,20 @@ def main(
 
             # --- Activity logging for the locked, visible target -----------
             if (
-                lock_name and activity_logger and locked is not None
+                lock_name and activity_logger and follow is not None
                 and frame_idx % config.ACTION_DETECT_EVERY_N_FRAMES == 0
-                and locked.full_landmarks
+                and follow.full_landmarks
             ):
                 detected_actions, baseline_mouth_width, mouth_width_samples = action_module.detect_smile_blink(
                     frame, baseline_mouth_width, mouth_width_samples,
                     last_action_frame, frame_idx,
                     cooldown_frames=config.LOCK_ACTION_COOLDOWN_FRAMES,
-                    landmarks_list=locked.full_landmarks,
+                    landmarks_list=follow.full_landmarks,
                 )
                 for act in detected_actions:
-                    activity_logger.log_activity(act, frame_idx, locked.center)
+                    activity_logger.log_activity(act, frame_idx, follow.center)
                     action_display.append((act.capitalize() + "!", ACTION_DISPLAY_DURATION))
-                for mv in activity_logger.detect_and_log_movement(locked.center, frame_idx):
+                for mv in activity_logger.detect_and_log_movement(follow.center, frame_idx):
                     action_display.append((mv.replace("_", " ").title() + "!", ACTION_DISPLAY_DURATION))
 
             action_display = [(label, n - 1) for label, n in action_display if n > 1]

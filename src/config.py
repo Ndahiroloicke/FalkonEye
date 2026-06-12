@@ -202,7 +202,9 @@ MQTT_MIN_COMMAND_INTERVAL_MS = 80   # Faster retargeting while centering a face
 
 # Max degrees ahead of reported position to command per MQTT message
 SERVO_CMD_MAX_STEP = 8
-SERVO_EDGE_MAX_STEP = 25            # Larger steps when face is near the frame edge
+SERVO_EDGE_MAX_STEP = 18            # Large steps at frame edge only
+SERVO_CENTER_MAX_STEP = 4             # When face is already centered — no pan-out
+FRAME_CONTAINMENT_ERROR = 0.55        # Emergency: face this far out must be pulled back
 
 # ----------------------------------------------------------------------------
 # SERVO CONTROL (must match ESP8266 firmware limits)
@@ -217,7 +219,7 @@ CENTER_ANGLE = SERVO_CENTER_ANGLE
 
 # Mounting sign: +1 if increasing angle pans the camera toward image-right,
 # -1 if it pans toward image-left. Flip this if the camera chases the wrong way.
-SERVO_DIRECTION_SIGN = -1
+SERVO_DIRECTION_SIGN = 1
 
 # Pan mapping — face at frame edge maps to center ± SERVO_PAN_RANGE
 SERVO_PAN_RANGE = 80
@@ -259,12 +261,12 @@ TRACKING_MOVEMENT_THRESHOLD = 0.05
 # ----------------------------------------------------------------------------
 # LOST-TARGET SEARCH & REACQUISITION (Issues #4, #5)
 # ----------------------------------------------------------------------------
-LOST_TARGET_TIMEOUT = 1.2        # Seconds target may be missing before SEARCH_MODE
-LOST_TARGET_FRAMES = 8           # Frames a track may be missing before it is dropped
+LOST_TARGET_TIMEOUT = 2.0        # Seconds with no face at all before SEARCH_MODE
+LOST_TARGET_FRAMES = 15          # Keep lock longer through brief detection gaps
 SEARCH_SWEEP_STEP = 6
-SEARCH_STEP_INTERVAL_SEC = 0.45  # Wait for ESP to finish step before next search move
-SEARCH_STALE_MOVE_SEC = 2.0      # If angle unchanged this long, allow next search step
-SEARCH_WRAP_AT_END = True        # At 180° go to 0° (and vice versa) and keep sweeping
+SEARCH_STEP_INTERVAL_SEC = 0.45
+SEARCH_STALE_MOVE_SEC = 2.0
+SEARCH_WRAP_AT_END = False       # Ping-pong 0 <-> 180 (reverse at each end)
 SEARCH_START_DIRECTION = "last"  # "last" | "left" | "right" — where to look first
 SEARCH_EXPAND_ENABLED = True     # Expand outward from last-known angle before full sweep
 SEARCH_REACQUIRE_FRAMES = 2      # Frames the original target must be re-seen to re-lock

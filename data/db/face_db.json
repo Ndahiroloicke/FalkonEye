@@ -1,8 +1,8 @@
 {
-  "timestamp": "2026-06-12 12:35:19",
+  "timestamp": "2026-06-12 16:34:03",
   "embedding_dim": 512,
   "names": [
     "loic"
   ],
-  "samples_used": 147
+  "samples_used": 521
 }

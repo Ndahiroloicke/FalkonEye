@@ -1,9 +1,9 @@
 """
 Pan tracking controller for the MQTT servo camera.
 
-TRACKING: strict centering — face near the edge gets fast, large corrections;
-          face near the middle holds still (anti-wiggle dead zone).
-SEARCH:   full 0-180 sweep with wrap when the speaker leaves the frame.
+TRACKING: keep the locked face in frame — never pan in a direction that pushes
+          them toward the edge; gentle corrections when already centered.
+SEARCH:   ping-pong sweep 0 -> 180 -> 0 until the speaker is reacquired.
 """
 
 import time
@@ -57,17 +57,34 @@ class PanTracker:
         self._last_search_step_time = 0.0
         self._search_active = False
 
+    def end_search(self) -> None:
+        """Leave search mode without resetting pan filter state."""
+        self._search_active = False
+        self._last_search_step_time = 0.0
+        self._smooth_face_x = None
+
     def begin_search(self) -> None:
-        """Call once when entering SEARCH mode — clears stale motion state."""
+        """Call once when entering SEARCH mode."""
         self._search_active = True
         self._last_search_step_time = 0.0
         self._smooth_face_x = None
         if self.mqtt:
             self.mqtt.sync_target_to_current()
+
+        from_angle = int(round(self.current_angle))
+        lo = config.SERVO_MIN_ANGLE
+        hi = config.SERVO_MAX_ANGLE
+        mid = config.SERVO_CENTER_ANGLE
+
+        # Ping-pong: start sweeping toward the nearest end, then reverse.
+        if from_angle >= mid:
+            self._search_dir = 1 if self.last_error_sign >= 0 else -1
+        else:
+            self._search_dir = -1 if self.last_error_sign <= 0 else 1
         if self.last_error_sign != 0:
             self._search_dir = self.last_error_sign * config.SERVO_DIRECTION_SIGN
-        elif self._search_dir == 0:
-            self._search_dir = 1
+        if self._search_dir == 0:
+            self._search_dir = 1 if from_angle <= mid else -1
 
     @property
     def current_angle(self) -> float:
@@ -80,15 +97,14 @@ class PanTracker:
         return self._smooth_angle
 
     def _ema_face_x(self, face_center_x: float, abs_error: float) -> float:
-        """Smooth face X; less smoothing when the face is far from center."""
         if self._smooth_face_x is None:
             self._smooth_face_x = face_center_x
             return self._smooth_face_x
 
         if abs_error >= config.SERVO_EDGE_ERROR:
-            alpha = 0.55
+            alpha = 0.45
         elif abs_error >= config.SERVO_MID_ERROR:
-            alpha = 0.35
+            alpha = 0.28
         else:
             w = max(2, config.SMOOTHING_WINDOW)
             alpha = 2.0 / (w + 1.0)
@@ -100,9 +116,10 @@ class PanTracker:
         return (face_center_x - frame_width / 2.0) / (frame_width / 2.0)
 
     def _in_dead_zone(self, error: float, face_center_x: float, frame_width: int) -> bool:
-        # Never hold still when the face is near the frame edge.
         if abs(error) >= config.SERVO_EDGE_ERROR:
             return False
+        if self.center_locked and abs(error) < config.SERVO_DEAD_ZONE_NORMALIZED:
+            return True
         if abs(error) < config.SERVO_DEAD_ZONE_NORMALIZED:
             return True
         return abs(face_center_x - frame_width / 2.0) < config.CENTER_DEAD_ZONE
@@ -111,7 +128,6 @@ class PanTracker:
         return abs(error) < config.CENTERING_TOLERANCE
 
     def _desired_angle(self, raw_error: float) -> float:
-        """Map normalized face offset to a servo angle."""
         return _clamp(
             config.SERVO_CENTER_ANGLE
             + raw_error * config.SERVO_PAN_RANGE * config.SERVO_DIRECTION_SIGN,
@@ -124,7 +140,12 @@ class PanTracker:
         abs_err = abs(raw_error)
 
         if abs_err >= config.SERVO_EDGE_ERROR:
-            self._smooth_angle = raw_desired
+            # Pull toward center but blend — avoids snapping past center.
+            blend = 0.72
+            self._smooth_angle = blend * raw_desired + (1.0 - blend) * self._smooth_angle
+        elif self.center_locked:
+            alpha = config.SERVO_SMOOTH_ALPHA * 0.6
+            self._smooth_angle += alpha * (raw_desired - self._smooth_angle)
         else:
             alpha = config.SERVO_SMOOTH_ALPHA
             if abs_err >= config.SERVO_MID_ERROR:
@@ -133,17 +154,36 @@ class PanTracker:
 
         return self._smooth_angle
 
-    def _tracking_limits(self, abs_error: float) -> Tuple[int, int, bool]:
-        """Return (max_step, min_delta, allow_retarget) for this error magnitude."""
+    def _tracking_limits(
+        self, abs_error: float, *, center_locked: bool
+    ) -> Tuple[int, int, bool]:
+        if center_locked:
+            return config.SERVO_CENTER_MAX_STEP, config.SERVO_MIN_PUBLISH_DELTA, False
         if abs_error >= config.SERVO_EDGE_ERROR:
             return config.SERVO_EDGE_MAX_STEP, config.SERVO_EDGE_MIN_PUBLISH_DELTA, True
         if abs_error >= config.SERVO_MID_ERROR:
-            return config.SERVO_CMD_MAX_STEP, 2, True
+            return config.SERVO_CMD_MAX_STEP, 2, False
         return (
             min(config.SERVO_CMD_MAX_STEP, config.SERVO_MAX_STEP_PER_FRAME),
             config.SERVO_MIN_PUBLISH_DELTA,
             False,
         )
+
+    def _clamp_cmd_no_overshoot(
+        self, cmd: int, from_angle: int, error: float, equilibrium: int
+    ) -> Optional[int]:
+        """Ensure the move pulls the face toward center, never pushes them out."""
+        if error > 0.02:
+            if cmd >= from_angle:
+                return None
+            cmd = max(cmd, equilibrium)
+        elif error < -0.02:
+            if cmd <= from_angle:
+                return None
+            cmd = min(cmd, equilibrium)
+        else:
+            return None
+        return int(_clamp(cmd, config.SERVO_MIN_ANGLE, config.SERVO_MAX_ANGLE))
 
     def _tracking_command(
         self,
@@ -159,7 +199,14 @@ class PanTracker:
         from_angle = int(round(self.current_angle))
         diff = desired - from_angle
         abs_err = abs(raw_error)
-        max_step, min_delta, allow_retarget = self._tracking_limits(abs_err)
+        max_step, min_delta, allow_retarget = self._tracking_limits(
+            abs_err, center_locked=self.center_locked
+        )
+
+        if abs_err >= config.FRAME_CONTAINMENT_ERROR:
+            max_step = config.SERVO_EDGE_MAX_STEP
+            min_delta = 1
+            allow_retarget = True
 
         if abs(diff) < min_delta:
             return None
@@ -169,7 +216,14 @@ class PanTracker:
         else:
             cmd = from_angle + (max_step if diff > 0 else -max_step)
 
-        cmd = int(_clamp(cmd, config.SERVO_MIN_ANGLE, config.SERVO_MAX_ANGLE))
+        equilibrium = int(round(self._desired_angle(raw_error)))
+        guarded = self._clamp_cmd_no_overshoot(cmd, from_angle, raw_error, equilibrium)
+        if guarded is None:
+            if self.log:
+                self.log.servo_hold(from_angle, "blocked — would push face out")
+            return None
+        cmd = guarded
+
         if abs(cmd - from_angle) < min_delta:
             return None
 
@@ -217,33 +271,28 @@ class PanTracker:
         return None
 
     def _next_search_angle(self, from_angle: int) -> Tuple[int, str]:
+        """Ping-pong: 0 -> 180 -> 0 -> 180 ..."""
         lo = config.SERVO_MIN_ANGLE
         hi = config.SERVO_MAX_ANGLE
         step = config.SEARCH_SWEEP_STEP
 
         if self._search_dir >= 0:
             if from_angle >= hi - 2:
-                if config.SEARCH_WRAP_AT_END:
-                    return lo, "search wrap 180° -> 0°"
                 self._search_dir = -1
-                return hi - step, "search reverse at max"
+                nxt = max(from_angle - step, lo)
+                return nxt, "search reverse at 180°"
             nxt = min(from_angle + step, hi)
             return nxt, f"search sweep -> {nxt}"
 
         if from_angle <= lo + 2:
-            if config.SEARCH_WRAP_AT_END:
-                return hi, "search wrap 0° -> 180°"
             self._search_dir = 1
-            return lo + step, "search reverse at min"
+            nxt = min(from_angle + step, hi)
+            return nxt, "search reverse at 0°"
         nxt = max(from_angle - step, lo)
         return nxt, f"search sweep -> {nxt}"
 
-    # --------------------------------------------------------------- tracking
     def track(self, face_center_x: float, frame_width: int) -> Tuple[str, Optional[int]]:
-        """
-        Keep the locked face in the middle of the frame.
-        Face on the right -> pan camera to pull face toward center (sign from config).
-        """
+        """Keep the locked face centered; never pan them toward the frame edge."""
         raw_error = self.normalized_error(face_center_x, frame_width)
         smooth_x = self._ema_face_x(face_center_x, abs(raw_error))
         error = self.normalized_error(smooth_x, frame_width)
@@ -256,8 +305,9 @@ class PanTracker:
             self.frames_in_center += 1
             self.center_locked = self.frames_in_center >= config.FRAMES_TO_LOCK_CENTER
         else:
-            self.frames_in_center = 0
-            self.center_locked = False
+            self.frames_in_center = max(0, self.frames_in_center - 1)
+            if self.frames_in_center == 0:
+                self.center_locked = False
 
         if self._in_dead_zone(error, smooth_x, frame_width):
             label = "centered" if self.center_locked else "tracking"
@@ -269,7 +319,12 @@ class PanTracker:
         desired_i = int(round(filtered))
 
         side = "right" if error > 0 else "left"
-        urgency = "strict" if abs(error) >= config.SERVO_EDGE_ERROR else "fine"
+        if abs(error) >= config.FRAME_CONTAINMENT_ERROR:
+            urgency = "contain"
+        elif abs(error) >= config.SERVO_EDGE_ERROR:
+            urgency = "strict"
+        else:
+            urgency = "fine"
         commanded = self._tracking_command(
             desired_i,
             error,
@@ -278,7 +333,6 @@ class PanTracker:
         label = "centered" if self.center_locked else "tracking"
         return (label, commanded)
 
-    # ----------------------------------------------------------------- search
     def search(self) -> Tuple[str, Optional[int]]:
         self.frames_in_center = 0
         self.center_locked = False
