@@ -1,0 +1,16 @@
+{
+  "person_name": "loic",
+  "session_start": "2026-06-12T13:56:26.757799",
+  "session_end": "2026-06-12T14:02:13.071320",
+  "session_duration_seconds": 346.31,
+  "activity_counts": {
+    "blink": 6,
+    "smile": 122,
+    "move_left": 51,
+    "move_right": 64,
+    "move_up": 3,
+    "move_down": 5
+  },
+  "total_activities": 251,
+  "csv_log": "C:\\Users\\RCA_USER_40\\Downloads\\FaceLocking-master\\FaceLocking-master\\data\\history\\loic_20260612_135626_activities.csv"
+}

@@ -36,6 +36,8 @@ class MQTTCameraController:
         self.is_connected = False
         self.last_status: dict = {}
         self._last_publish_ms = 0.0
+        self._last_reported_angle: Optional[int] = None
+        self._angle_unchanged_since = 0.0
 
         self.client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
@@ -56,7 +58,15 @@ class MQTTCameraController:
         except Exception as exc:
             print(f"ERROR: MQTT connection failed: {exc}")
 
-    def _on_connect(self, client, userdata, flags, rc, properties=None):
+    @staticmethod
+    def _reason_code_value(reason_code) -> int:
+        try:
+            return int(reason_code)
+        except (TypeError, ValueError):
+            return 0
+
+    def _on_connect(self, client, userdata, flags, reason_code, properties=None):
+        rc = self._reason_code_value(reason_code)
         if rc == 0:
             self.is_connected = True
             client.subscribe(self.topic_status, qos=config.MQTT_QOS)
@@ -64,8 +74,9 @@ class MQTTCameraController:
         else:
             print(f"ERROR: MQTT connect failed rc={rc}")
 
-    def _on_disconnect(self, client, userdata, rc, properties=None):
+    def _on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties=None):
         self.is_connected = False
+        rc = self._reason_code_value(reason_code)
         if rc != 0:
             print(f"WARN: MQTT disconnected rc={rc}")
 
@@ -80,9 +91,25 @@ class MQTTCameraController:
                 self.last_status = {"raw": payload}
             angle = self.last_status.get("angle")
             if angle is not None:
-                self.current_angle = int(angle)
+                new_angle = int(angle)
+                if self._last_reported_angle is None or self._last_reported_angle != new_angle:
+                    self._last_reported_angle = new_angle
+                    self._angle_unchanged_since = time.time()
+                self.current_angle = new_angle
         except Exception:
             pass
+
+    def sync_target_to_current(self) -> None:
+        """Align commanded target with reported position (e.g. when search starts)."""
+        self.target_angle = int(self.current_angle)
+        esp_target = self.last_status.get("target")
+        if esp_target is not None:
+            self.target_angle = int(esp_target)
+
+    def _motion_stale(self) -> bool:
+        if self._angle_unchanged_since <= 0:
+            return False
+        return (time.time() - self._angle_unchanged_since) >= config.SEARCH_STALE_MOVE_SEC
 
     def _rate_limited(self) -> bool:
         now = time.time() * 1000.0
@@ -100,15 +127,48 @@ class MQTTCameraController:
         return result.rc == mqtt.MQTT_ERR_SUCCESS
 
     def is_moving(self) -> bool:
-        return bool(self.last_status.get("moving", False))
+        status = self.last_status
+        if status.get("moving"):
+            return True
+        target = status.get("target")
+        if target is not None:
+            return abs(int(target) - self.current_angle) > 1
+        return False
 
-    def move_to_angle(self, angle: int) -> bool:
+    def ready_for_command(self, *, allow_stale: bool = False) -> bool:
+        """True when ESP is idle or has nearly reached its active target."""
+        if not self.is_connected:
+            return False
+        if allow_stale and self._motion_stale():
+            return True
+        esp_target = self.last_status.get("target")
+        if esp_target is not None:
+            if abs(int(esp_target) - self.current_angle) <= 2:
+                return True
+        if not self.is_moving():
+            return True
+        return abs(self.current_angle - self.target_angle) <= 2
+
+    def move_to_angle(
+        self,
+        angle: int,
+        *,
+        force: bool = False,
+        allow_retarget: bool = False,
+    ) -> bool:
+        """Send absolute target angle to ESP8266."""
         angle = int(max(config.SERVO_MIN_ANGLE, min(config.SERVO_MAX_ANGLE, angle)))
-        if abs(angle - self.target_angle) < 1:
+        if not force and not allow_retarget and abs(angle - self.target_angle) < 1:
+            return False
+        if allow_retarget:
+            if abs(angle - self.target_angle) < 1:
+                return False
+        elif not self.ready_for_command(allow_stale=force):
             return False
         ok = self._publish(self.topic_horizontal, str(angle))
         if ok:
             self.target_angle = angle
+            self._angle_unchanged_since = time.time()
         return ok
 
     def send_command(self, command: str) -> bool:

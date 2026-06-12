@@ -10,10 +10,10 @@
  * - Camera mounted on servo
  * 
  * Connections:
- * - Servo Signal -> D5 (GPIO14)  [SRS hardware spec]
+ * - Servo Signal -> D4 (GPIO2)  — default for this build
  * - Servo VCC -> VIN (5V)
  * - Servo GND -> GND
- * Alternate pin: D4 (GPIO2) if D5 is unavailable
+ * Alternate pin: D5 (GPIO14)
  * 
  * MQTT Topics:
  * - camera/track/horizontal - Receives horizontal position (0-180 degrees)
@@ -44,14 +44,14 @@ const char* topic_horizontal = "camera/track/horizontal";
 const char* topic_command = "camera/track/command";
 const char* topic_status = "camera/status";
 
-// Servo settings — SRS: D5 (GPIO14). Use D4 if your board is already wired there.
-const int SERVO_PIN = D5;
+// Servo signal pin — YOUR WIRING IS D4 (change to D5 if you rewired)
+const int SERVO_PIN = D4;
 const int SERVO_MIN_ANGLE = 0;
 const int SERVO_MAX_ANGLE = 180;
 const int SERVO_CENTER_ANGLE = 90;
 const int SERVO_STEP_SIZE = 5;   // Manual nudge step (left/right commands)
 
-// Movement smoothing — 1 degree per step; higher delay = smoother motion
+// Movement smoothing — 1 degree per step; higher delay = smoother, less wiggle
 const int MOVEMENT_DELAY = 30;  // ms between each 1-degree step toward target
 
 // Debug mode
@@ -68,7 +68,9 @@ Servo cameraServo;
 int currentAngle = SERVO_CENTER_ANGLE;
 int targetAngle = SERVO_CENTER_ANGLE;
 unsigned long lastStatusUpdate = 0;
-const unsigned long STATUS_UPDATE_INTERVAL = 1000;  // Send status every 1 second
+unsigned long lastMoveMs = 0;
+const unsigned long STATUS_UPDATE_INTERVAL = 250;  // Publish while moving
+const unsigned long MOVEMENT_INTERVAL_MS = 40;    // 1 degree every 40ms (~25 deg/s)
 
 // ============================================================================
 // SETUP
@@ -82,12 +84,28 @@ void setup() {
   Serial.println("ESP8266 Camera Tracker Starting");
   Serial.println("=================================\n");
 
-  // Initialize servo
+  // Initialize servo on D4
   cameraServo.attach(SERVO_PIN);
   cameraServo.write(SERVO_CENTER_ANGLE);
   currentAngle = SERVO_CENTER_ANGLE;
   targetAngle = SERVO_CENTER_ANGLE;
-  Serial.println("✓ Servo initialized at center position");
+  Serial.print("OK: Servo on pin D4, center ");
+  Serial.println(SERVO_CENTER_ANGLE);
+
+  // Boot hardware test — servo MUST move 70-110-90 or check wiring/power
+  Serial.println("Boot test: sweeping 70 -> 110 -> 90 ...");
+  for (int a = 70; a <= 110; a += 5) {
+    cameraServo.write(a);
+    currentAngle = a;
+    delay(250);
+  }
+  for (int a = 110; a >= 90; a -= 5) {
+    cameraServo.write(a);
+    currentAngle = a;
+    delay(250);
+  }
+  targetAngle = SERVO_CENTER_ANGLE;
+  Serial.println("OK: Boot sweep done. If servo did not move, check D4 signal + 5V power.");
 
   // Connect to WiFi
   setup_wifi();
@@ -273,44 +291,32 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
 }
 
 // ============================================================================
-// SMOOTH SERVO MOVEMENT
+// SMOOTH SERVO MOVEMENT (non-blocking — MQTT keeps working while moving)
 // ============================================================================
 void updateServoPosition() {
+  unsigned long now = millis();
 
   if (currentAngle != targetAngle) {
-
-    if (DEBUG) {
-      Serial.print("🔄 Moving | Current: ");
-      Serial.print(currentAngle);
-      Serial.print(" -> Target: ");
-      Serial.println(targetAngle);
+    if (now - lastMoveMs >= MOVEMENT_INTERVAL_MS) {
+      lastMoveMs = now;
+      if (currentAngle < targetAngle) {
+        currentAngle++;
+      } else {
+        currentAngle--;
+      }
+      cameraServo.write(currentAngle);
+      if (DEBUG) {
+        Serial.print("Servo ");
+        Serial.print(currentAngle);
+        Serial.print(" -> target ");
+        Serial.println(targetAngle);
+      }
     }
+  }
 
-    // Determine direction
-    if (currentAngle < targetAngle) {
-      currentAngle++;
-      if (DEBUG) Serial.println("➡ Direction: RIGHT (+1)");
-    } else if (currentAngle > targetAngle) {
-      currentAngle--;
-      if (DEBUG) Serial.println("⬅ Direction: LEFT (-1)");
-    }
-
-    cameraServo.write(currentAngle);
-
-    if (DEBUG) {
-      Serial.print("📍 Servo now at: ");
-      Serial.println(currentAngle);
-    }
-
-    delay(MOVEMENT_DELAY);
-
-    // Movement completed
-    if (currentAngle == targetAngle) {
-      Serial.println("✅ Movement Complete");
-      Serial.print("🎯 Final Position: ");
-      Serial.println(currentAngle);
-      publishStatus();
-    }
+  if (now - lastStatusUpdate >= STATUS_UPDATE_INTERVAL) {
+    publishStatus();
+    lastStatusUpdate = now;
   }
 }
 

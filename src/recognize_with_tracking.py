@@ -328,6 +328,7 @@ def main(
                     if state != "SEARCHING":
                         direction = "right" if pan.last_error_sign > 0 else "left" if pan.last_error_sign < 0 else "center"
                         tlog.search_started(lock_name, pan.last_known_angle, direction)
+                        pan.begin_search()
                     state = "SEARCHING"
                     pan_label, commanded_angle = pan.search()
                 else:

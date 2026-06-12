@@ -198,7 +198,11 @@ MQTT_TOPIC_STATUS = "camera/status"
 MQTT_TOPIC_EVENTS = "camera/track/events"  # SRS tracking commands (JSON)
 MQTT_KEEPALIVE = 30
 MQTT_QOS = 1
-MQTT_MIN_COMMAND_INTERVAL_MS = 80   # Smooth but responsive (ESP moves ~1 deg/25ms)
+MQTT_MIN_COMMAND_INTERVAL_MS = 80   # Faster retargeting while centering a face
+
+# Max degrees ahead of reported position to command per MQTT message
+SERVO_CMD_MAX_STEP = 8
+SERVO_EDGE_MAX_STEP = 25            # Larger steps when face is near the frame edge
 
 # ----------------------------------------------------------------------------
 # SERVO CONTROL (must match ESP8266 firmware limits)
@@ -213,14 +217,17 @@ CENTER_ANGLE = SERVO_CENTER_ANGLE
 
 # Mounting sign: +1 if increasing angle pans the camera toward image-right,
 # -1 if it pans toward image-left. Flip this if the camera chases the wrong way.
-SERVO_DIRECTION_SIGN = 1
+SERVO_DIRECTION_SIGN = -1
 
-# Smooth centering — face offset maps to pan angle (no jittery PID)
-SERVO_PAN_RANGE = 90           # Degrees from center when face is at frame edge
-SERVO_SMOOTH_ALPHA = 0.12      # Base smoothing (higher = faster centering)
-SERVO_SMOOTH_ALPHA_MAX = 0.22  # Faster when face is far from center
-SERVO_MIN_PUBLISH_DELTA = 1    # Min degrees before sending MQTT (reduces wiggle)
-SERVO_MAX_STEP_PER_FRAME = 5   # Max smooth step per video frame
+# Pan mapping — face at frame edge maps to center ± SERVO_PAN_RANGE
+SERVO_PAN_RANGE = 80
+SERVO_EDGE_ERROR = 0.30           # |error| above this → strict / fast centering
+SERVO_MID_ERROR = 0.12            # Moderate zone between edge and dead band
+SERVO_SMOOTH_ALPHA = 0.18         # Near center — gentle
+SERVO_SMOOTH_ALPHA_MAX = 0.65      # Far from center — snap filtered target quickly
+SERVO_MIN_PUBLISH_DELTA = 3        # Min move when face is near center (anti-wiggle)
+SERVO_EDGE_MIN_PUBLISH_DELTA = 1   # Min move when face is at frame edge
+SERVO_MAX_STEP_PER_FRAME = 8
 
 # Legacy PID aliases (smooth centering is used instead)
 SERVO_PID_KP = 10.0
@@ -233,16 +240,16 @@ SMOOTHING_FACTOR = 0.25
 SERVO_STEP_SIZE = 5
 SERVO_MAX_PAN_OFFSET = SERVO_PAN_RANGE
 
-# Dead zone: ignore tiny face offsets so the servo stays still when centered.
-CENTER_DEAD_ZONE = 12  # Pixels — hold still only when face is near frame center
-SERVO_DEAD_ZONE_NORMALIZED = 0.08  # Legacy normalized fallback
+# Dead zone applies only when the face is already near the middle of the frame.
+CENTER_DEAD_ZONE = 16  # Pixels
+SERVO_DEAD_ZONE_NORMALIZED = 0.06
 
 # ----------------------------------------------------------------------------
 # TRACKING BEHAVIOR
 # ----------------------------------------------------------------------------
-ENABLE_AUTO_CENTERING = True  # Continuous pan to keep locked face centered
-CENTERING_TOLERANCE = 0.10    # Normalized half-width counted as "centered"
-FRAMES_TO_LOCK_CENTER = 8     # Frames inside center zone before "centered" state
+ENABLE_AUTO_CENTERING = True
+CENTERING_TOLERANCE = 0.08    # Tighter — must be closer to count as centered
+FRAMES_TO_LOCK_CENTER = 6
 
 # Legacy step-based mode (kept for compatibility; PID path is preferred)
 MOVEMENT_BASED_TRACKING = False
@@ -252,10 +259,12 @@ TRACKING_MOVEMENT_THRESHOLD = 0.05
 # ----------------------------------------------------------------------------
 # LOST-TARGET SEARCH & REACQUISITION (Issues #4, #5)
 # ----------------------------------------------------------------------------
-LOST_TARGET_TIMEOUT = 0.8        # Seconds target may be missing before SEARCH_MODE
+LOST_TARGET_TIMEOUT = 1.2        # Seconds target may be missing before SEARCH_MODE
 LOST_TARGET_FRAMES = 8           # Frames a track may be missing before it is dropped
-SEARCH_SWEEP_STEP = 3            # Degrees per search step (smooth continuous scan)
-SEARCH_STEP_INTERVAL_SEC = 0.12  # Match ESP ~1 deg / 25ms; keeps scanning without stutter
+SEARCH_SWEEP_STEP = 6
+SEARCH_STEP_INTERVAL_SEC = 0.45  # Wait for ESP to finish step before next search move
+SEARCH_STALE_MOVE_SEC = 2.0      # If angle unchanged this long, allow next search step
+SEARCH_WRAP_AT_END = True        # At 180° go to 0° (and vice versa) and keep sweeping
 SEARCH_START_DIRECTION = "last"  # "last" | "left" | "right" — where to look first
 SEARCH_EXPAND_ENABLED = True     # Expand outward from last-known angle before full sweep
 SEARCH_REACQUIRE_FRAMES = 2      # Frames the original target must be re-seen to re-lock
