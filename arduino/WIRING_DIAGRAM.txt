@@ -1,0 +1,242 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                    ESP8266 + SERVO MOTOR WIRING DIAGRAM                   ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          BASIC SETUP (Single Servo)                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    ESP8266 NodeMCU                    SG90 Servo Motor
+    ┌─────────────┐                    ┌──────────────┐
+    │             │                    │              │
+    │         D4  ├────────────────────┤ Signal       │ (Orange/Yellow wire)
+    │    (GPIO2)  │                    │              │
+    │             │                    │              │
+    │         5V  ├────────────────────┤ VCC (+)      │ (Red wire)
+    │             │                    │              │
+    │             │                    │              │
+    │        GND  ├────────────────────┤ GND (-)      │ (Brown/Black wire)
+    │             │                    │              │
+    └──────┬──────┘                    └──────────────┘
+           │
+           │ USB Cable
+           │ (Power + Programming)
+           │
+           ▼
+    ┌─────────────┐
+    │  Computer   │
+    │  (USB Port) │
+    └─────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    IMPROVED SETUP (External Power)                          │
+│                  (Use if servo jitters or ESP8266 resets)                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    ESP8266 NodeMCU                    SG90 Servo Motor
+    ┌─────────────┐                    ┌──────────────┐
+    │             │                    │              │
+    │         D4  ├────────────────────┤ Signal       │ (Orange/Yellow wire)
+    │    (GPIO2)  │                    │              │
+    │             │                    │              │
+    │        GND  ├────┬───────────────┤ GND (-)      │ (Brown/Black wire)
+    │             │    │               │              │
+    └──────┬──────┘    │               │              │
+           │           │               │ VCC (+)      │ (Red wire)
+           │           │               └──────┬───────┘
+           │           │                      │
+           │           │                      │
+           │           │               ┌──────▼───────┐
+           │           │               │              │
+           │           └───────────────┤ GND (-)      │
+           │                           │              │
+           │                           │              │
+           │                           │ 5V (+)       │
+           │                           │              │
+           │                           └──────────────┘
+           │                          External 5V Power
+           │                          (USB charger, battery, etc.)
+           │
+           │ USB Cable
+           │ (Programming only)
+           │
+           ▼
+    ┌─────────────┐
+    │  Computer   │
+    └─────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    ADVANCED SETUP (Pan & Tilt - 2 Servos)                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    ESP8266 NodeMCU          Pan Servo (Horizontal)    Tilt Servo (Vertical)
+    ┌─────────────┐          ┌──────────────┐          ┌──────────────┐
+    │             │          │              │          │              │
+    │         D4  ├──────────┤ Signal       │          │              │
+    │    (GPIO2)  │          │              │          │              │
+    │             │          │              │          │              │
+    │         D5  ├──────────┼──────────────┼──────────┤ Signal       │
+    │    (GPIO14) │          │              │          │              │
+    │             │          │              │          │              │
+    │         5V  ├──────────┤ VCC (+)      ├──────────┤ VCC (+)      │
+    │             │          │              │          │              │
+    │             │          │              │          │              │
+    │        GND  ├──────────┤ GND (-)      ├──────────┤ GND (-)      │
+    │             │          │              │          │              │
+    └─────────────┘          └──────────────┘          └──────────────┘
+                                    │                         │
+                                    └────────┬────────────────┘
+                                             │
+                                        Camera Mount
+                                    (Pan rotates, Tilt tilts)
+
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                              PIN REFERENCE                                ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+NodeMCU Pin    GPIO Number    Function           Notes
+───────────────────────────────────────────────────────────────────────────
+D0             GPIO16         -                  Don't use for servo
+D1             GPIO5          I2C SCL            Can use for servo
+D2             GPIO4          I2C SDA            Can use for servo
+D3             GPIO0          Flash button       Don't use for servo
+D4             GPIO2          Built-in LED       ✓ RECOMMENDED for servo
+D5             GPIO14         SPI SCK            Can use for servo
+D6             GPIO12         SPI MISO           Can use for servo
+D7             GPIO13         SPI MOSI           Can use for servo
+D8             GPIO15         SPI CS             Don't use for servo
+───────────────────────────────────────────────────────────────────────────
+3V3            3.3V           Power output       Don't use for servo!
+5V             5V             Power output       ✓ Use for servo VCC
+GND            Ground         Ground             ✓ Use for servo GND
+VIN            5V input       External power     Alternative power input
+
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                           SERVO WIRE COLORS                               ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+Standard SG90 Servo:
+  • Orange/Yellow  →  Signal (PWM control)
+  • Red            →  VCC (+5V power)
+  • Brown/Black    →  GND (Ground)
+
+Some servos may have different colors:
+  • White/Yellow   →  Signal
+  • Red            →  VCC
+  • Black/Brown    →  GND
+
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                          POWER REQUIREMENTS                               ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+Component          Voltage    Current (typical)    Current (max)
+─────────────────────────────────────────────────────────────────────────
+ESP8266            3.3V       80mA                 170mA
+SG90 Servo         4.8-6V     100mA (idle)         650mA (stall)
+USB Port           5V         500mA                500mA
+─────────────────────────────────────────────────────────────────────────
+
+⚠️  WARNING: Single servo can work from USB, but may cause:
+   - ESP8266 resets when servo moves
+   - Servo jittering
+   - Unstable operation
+
+✓  SOLUTION: Use external 5V power supply (1A or more) for servo
+
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                         TROUBLESHOOTING TIPS                              ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+Problem: Servo jitters or vibrates
+Solution:
+  • Use external 5V power supply
+  • Add 100µF capacitor across servo power pins
+  • Increase MOVEMENT_DELAY in code
+
+Problem: ESP8266 keeps resetting
+Solution:
+  • Servo drawing too much current
+  • Use external power for servo
+  • Check USB cable quality
+
+Problem: Servo doesn't move at all
+Solution:
+  • Check wiring (especially signal wire to D4)
+  • Verify servo is good (test with simple sketch)
+  • Check Serial Monitor for errors
+
+Problem: Servo moves but camera doesn't follow
+Solution:
+  • Check MQTT connection
+  • Verify face recognition is detecting movement
+  • Check servo is mechanically attached to camera
+
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                          CAMERA MOUNTING                                  ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+Simple Mount:
+  1. Attach servo horn to servo motor
+  2. Use hot glue or tape to attach camera to servo horn
+  3. Ensure camera cable has slack for movement
+
+Better Mount:
+  1. 3D print or buy servo camera mount
+  2. Secure camera with screws
+  3. Balance weight for smooth movement
+
+Pan & Tilt Mount:
+  1. Mount tilt servo on pan servo
+  2. Attach camera to tilt servo
+  3. Ensure both servos can move freely
+
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                            SAFETY NOTES                                   ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+⚠️  Do not connect servo VCC to 3.3V pin - it needs 5V!
+⚠️  Do not reverse polarity - check wire colors carefully
+⚠️  Do not exceed servo current rating - use appropriate power supply
+⚠️  Ensure servo can move freely - don't force it against obstacles
+⚠️  Keep wires away from moving parts
+
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                         RECOMMENDED PARTS                                 ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+ESP8266 Board:
+  • NodeMCU v1.0 (CP2102 or CH340 chip) - $3-5
+  • Wemos D1 Mini - $2-4
+
+Servo Motor:
+  • SG90 9g Micro Servo - $2-3
+  • MG90S Metal Gear Servo (stronger) - $3-5
+
+Power Supply:
+  • 5V 2A USB charger - $3-5
+  • 4x AA battery holder (6V) - $2-3
+
+Accessories:
+  • Jumper wires (male-to-male) - $2
+  • Breadboard (optional) - $2-3
+  • 100µF capacitor - $0.50
+  • Pan-tilt servo bracket - $3-5
+
+
+═══════════════════════════════════════════════════════════════════════════
+
+For more information, see:
+  • MQTT_CAMERA_TRACKING.md - Complete setup guide
+  • MQTT_QUICK_START.md - Quick start guide
+  • arduino/README.md - Arduino code documentation
+
+═══════════════════════════════════════════════════════════════════════════
